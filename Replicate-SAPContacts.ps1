@@ -8,10 +8,10 @@
 .OUTPUTS
   None
 .NOTES
-  Version:        1.0
+  Version:        1.1
   Author:         Tobias Meier
   Creation Date:  05.02.2022
-  Purpose/Change: Initial script development
+  Purpose/Change: Logging & Bugfixes
   
 .EXAMPLE
   Replicate-SAPContacts.ps1
@@ -137,7 +137,7 @@ function Write-Log {
         Time = (Get-Date -f g)
         Message = $Message
         Severity = $Severity
-    } | Export-Csv -Path "$env:Temp\Replicate-SAPContacts-Log.csv" -Append -NoTypeInformation
+    } | Export-Csv -Path "Replicate-SAPContacts-Log.csv" -Append -NoTypeInformation
  }
 
  #-----------------------------------------------------------[Execution]------------------------------------------------------------
@@ -145,7 +145,17 @@ function Write-Log {
 Write-Log -Severity Information -Message "Script started"
 
 #Run SQL query get SQL Contacts
-$SQLContactsRaw = Invoke-Sqlcmd -ServerInstance $SQLServerName -Database $SQLDataBase -Query $SQLQuery
+try {
+    $SQLContactsRaw = Invoke-Sqlcmd -ServerInstance $SQLServerName -Database $SQLDataBase -Query $SQLQuery -OutputSqlErrors $true -ErrorVariable invokeSqlError
+    Write-Log -Severity Information -Message "Loaded SQL data"
+}
+catch {
+    Write-Log -Severity Error -Message "Could not connect to SQL Server"
+    Write-Log -Severity Error -Message $_.Exception
+    Write-Log -Severity Error -Message $invokeSqlError
+    return
+}
+
 #Type conversion Contacts class 
 $SQLContactsRaw | ForEach-Object { 
     #Since e-mail address must be unique create the object only if the e-mail adress is unique...
@@ -156,7 +166,8 @@ $SQLContactsRaw | ForEach-Object {
 }
 
 #Get Mailcontacts
-$EXOContactsRaw = Get-Contact | select * | Where { $_.Notes -ne "" }
+$EXOContactsRaw = Get-Contact -ResultSize unlimited | select * | Where { $_.Notes -ne "" }
+Write-Log -Severity Information -Message "Loaded Exchange Online data"
 #Type conversion Contacts class 
 $EXOContactsRaw | ForEach-Object { $EXOContacts+=$(New-Object -TypeName Contact -ArgumentList $_.Notes,$_.FirstName,$_.LastName,$_.Company,$_.WindowsEmailAddress,$_.Phone,$_.MobilePhone,$_.HomePhone) }
 
