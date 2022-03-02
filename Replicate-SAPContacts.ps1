@@ -8,10 +8,10 @@
 .OUTPUTS
   None
 .NOTES
-  Version:        1.1
+  Version:        1.2
   Author:         Tobias Meier
   Creation Date:  05.02.2022
-  Purpose/Change: Logging & Bugfixes
+  Purpose/Change: e.164 conversion fixed
   
 .EXAMPLE
   Replicate-SAPContacts.ps1
@@ -45,6 +45,60 @@ WHERE (dbo.OCPR.E_MailL IS NOT NULL AND DATALENGTH(dbo.OCPR.E_MailL) > 0)
 AND 
 (dbo.OCPR.Tel1 IS NOT NULL OR dbo.OCPR.Tel2 IS NOT NULL OR dbo.OCPR.Cellolar IS NOT NULL);
 '
+
+#-----------------------------------------------------------[Functions]------------------------------------------------------------
+
+function Convert-PhoneNumber {
+    [CmdletBinding()]
+    param(
+        [Parameter()]
+        [string]$Number
+    )
+    
+
+    #Case 079 or 044: Convert to +41 79
+    if ( $Number -match "^0[1-9][0-9].*" ) {
+        $NewNumber=$Number -replace '^0','+41 '
+    }
+    #Case 0044 or 0041: Convert to +44
+    elseif ( $Number -match "^00[1-9][1-9].*" ) {
+        $NewNumber=$Number -replace '^00','+'
+    }
+
+    else {
+        $NewNumber = $Number
+    }
+
+    return $NewNumber
+}
+
+function Delete-Contacts { 
+    foreach ( $Contact in $SQLContacts ) {
+        $ContactToRemove = Get-Contact | Where {$_.Notes -eq $Contact.ID -or $_.DisplayName -eq $Contact.DisplayName}
+        Remove-MailContact -Identity "$ContactToRemove" -Confirm:$false -ErrorAction SilentlyContinue
+        Write-Log -Severity Information -Message "Deleting Contact $ContactToRemove"
+    }
+}
+
+function Write-Log {
+    [CmdletBinding()]
+    param(
+        [Parameter()]
+        [ValidateNotNullOrEmpty()]
+        [string]$Message,
+ 
+        [Parameter()]
+        [ValidateNotNullOrEmpty()]
+        [ValidateSet('Information','Warning','Error')]
+        [string]$Severity = 'Information'
+    )
+ 
+    [pscustomobject]@{
+        Time = (Get-Date -f g)
+        Message = $Message
+        Severity = $Severity
+    } | Export-Csv -Path "Replicate-SAPContacts-Log.csv" -Append -NoTypeInformation
+ }
 
 #----------------------------------------------------------[Declarations]----------------------------------------------------------
 
@@ -95,10 +149,10 @@ class Contact
         $this.Mobile=$this.Mobile -replace '^00','+'
         $this.SecondaryPhone=$this.SecondaryPhone -replace '^00','+'
 
-        #Replace "0xx" with "+41 xx"
-        $this.Phone=$this.Phone -replace '^0','+41 '
-        $this.Mobile=$this.Mobile -replace '^0','+41 '
-        $this.SecondaryPhone=$this.SecondaryPhone -replace '^0','+41 '
+        #Normalize phone number to E.164
+        $this.Phone=$(Convert-PhoneNumber -Number $this.Phone)
+        $this.Mobile=$(Convert-PhoneNumber -Number $this.Mobile)
+        $this.SecondaryPhone=$(Convert-PhoneNumber -Number $this.SecondaryPhone)
 
         #Remove excessive text after mail address
         $this.EMail=$this.EMail -replace '^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$','$0'
@@ -110,39 +164,25 @@ class Contact
     }
 }
 
-#-----------------------------------------------------------[Functions]------------------------------------------------------------
-
-function Delete-Contacts { 
-    foreach ( $Contact in $SQLContacts ) {
-        $ContactToRemove = Get-Contact | Where {$_.Notes -eq $Contact.ID -or $_.DisplayName -eq $Contact.DisplayName}
-        Remove-MailContact -Identity "$ContactToRemove" -Confirm:$false -ErrorAction SilentlyContinue
-        Write-Log -Severity Information -Message "Deleting Contact $ContactToRemove"
-    }
-}
-
-function Write-Log {
-    [CmdletBinding()]
-    param(
-        [Parameter()]
-        [ValidateNotNullOrEmpty()]
-        [string]$Message,
- 
-        [Parameter()]
-        [ValidateNotNullOrEmpty()]
-        [ValidateSet('Information','Warning','Error')]
-        [string]$Severity = 'Information'
-    )
- 
-    [pscustomobject]@{
-        Time = (Get-Date -f g)
-        Message = $Message
-        Severity = $Severity
-    } | Export-Csv -Path "Replicate-SAPContacts-Log.csv" -Append -NoTypeInformation
- }
-
  #-----------------------------------------------------------[Execution]------------------------------------------------------------
 
 Write-Log -Severity Information -Message "Script started"
+
+try {
+    Connect-ExchangeOnline -CertificateThumbPrint "1e3e53810ed235e26396cbef64a443145f06428d" -AppID "7d11008b-b6db-4920-b59b-d13349eace8a" -Organization "mtfdata.ch"
+    Write-Log -Severity Information -Message "Connected to Exchange Online"
+}
+catch {
+    Write-Log -Severity Error -Message "Could not connect to EXO"
+    Write-Log -Severity Error -Message $_.Exception
+    return
+}
+$getsessions = Get-PSSession | Select-Object -Property State, Name
+$isconnected = (@($getsessions) -like '@{State=Opened; Name=ExchangeOnlineInternalSession*').Count -gt 0
+if ($isconnected -ne "True") {
+    Write-Log -Severity Error -Message "Could not connect to EXO"
+    return
+}
 
 #Run SQL query get SQL Contacts
 try {
@@ -188,7 +228,7 @@ foreach ($Contact in $($ContactsToCreateOrDelete | Where {$_.SideIndicator -eq "
     #Since contact object consists only of ID overwrite it with all properties
     $Contact=$($SQLContacts | Where {$_.ID -eq $Contact.ID})
 
-    New-MailContact -Name $Contact.DisplayName -DisplayName $Contact.DisplayName -ExternalEmailAddress $Contact.EMail -FirstName $Contact.FirstName -LastName $Contact.LastName
+    #New-MailContact -Name $Contact.DisplayName -DisplayName $Contact.DisplayName -ExternalEmailAddress $Contact.EMail -FirstName $Contact.FirstName -LastName $Contact.LastName
     Set-Contact -Identity $Contact.DisplayName -Notes $Contact.ID
     
     Write-Log -Severity Information -Message "Creating Contact $($Contact.DisplayName)"
