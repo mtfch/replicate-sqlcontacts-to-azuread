@@ -228,7 +228,7 @@ foreach ($Contact in $($ContactsToCreateOrDelete | Where {$_.SideIndicator -eq "
     #Since contact object consists only of ID overwrite it with all properties
     $Contact=$($SQLContacts | Where {$_.ID -eq $Contact.ID})
 
-    #New-MailContact -Name $Contact.DisplayName -DisplayName $Contact.DisplayName -ExternalEmailAddress $Contact.EMail -FirstName $Contact.FirstName -LastName $Contact.LastName
+    New-MailContact -Name $Contact.DisplayName -DisplayName $Contact.DisplayName -ExternalEmailAddress $Contact.EMail -FirstName $Contact.FirstName -LastName $Contact.LastName
     Set-Contact -Identity $Contact.DisplayName -Notes $Contact.ID
     
     Write-Log -Severity Information -Message "Creating Contact $($Contact.DisplayName)"
