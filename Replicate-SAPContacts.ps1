@@ -169,7 +169,7 @@ class Contact
 Write-Log -Severity Information -Message "Script started"
 
 try {
-    Connect-ExchangeOnline -CertificateThumbPrint "1e3e53810ed235e26396cbef64a443145f06428d" -AppID "7d11008b-b6db-4920-b59b-d13349eace8a" -Organization "mtfdata.ch"
+    Connect-ExchangeOnline -CertificateThumbPrint "<Insert Cert ID>" -AppID "<insert app ID>" -Organization "<insert organization domain>"
     Write-Log -Severity Information -Message "Connected to Exchange Online"
 }
 catch {
